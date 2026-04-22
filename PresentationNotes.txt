@@ -1,0 +1,5 @@
+Feedback from Professor Rai on my presentation:
+
+what is n? How many rows, cols, etc
+
+He suggested to scale in order to fix the issue

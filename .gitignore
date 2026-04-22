@@ -1,0 +1,11 @@
+# Model binaries (too large for GitHub)
+models/*.pkl
+models/*.pt
+
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
