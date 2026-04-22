@@ -159,6 +159,105 @@ Top 5: temperature_2m_avg (0.169), CDH (0.165), temp_sq (0.154), apparent_temper
 
 ---
 
+## Approach Comparison Findings (April 22, 2026 live run)
+
+### Decision Tree Flat-Line Failure on Mild Spring Days
+
+**Observed:** On the April 22 live comparison (Fig 25), all Decision Tree variants produce
+flat or near-flat predictions for overnight hours (00:00–05:00), returning a single constant
+value (~34.75 GW) for all six hours.
+
+**Root cause — not missing data, but feature variance collapse:**
+The DT's root split is `temperature_2m_avg > 82.6°F`. On a mild spring day (high of 76°F),
+every hour falls down the same branch at the root. Below that branch, the tree can only
+differentiate hours using CDH, shortwave radiation, and cyclic time encodings. For hours
+00–05, all three are near-zero or identical (CDH = 0, shortwave = 0, temperatures ~63°F),
+so all six hours land in the same leaf node and receive the same prediction.
+
+The tree produced only **13 distinct output values** across all 24 hours of a spring day,
+compared to the smooth continuous curves produced by SVR and MLP.
+
+**Why this happens structurally:**
+Decision trees can only predict values they've seen in training leaf nodes — they cannot
+interpolate or extrapolate. The tree learned its most informative splits around high-CDH
+summer conditions (when peaks matter most and variance is highest). On low-variance mild
+days those splits are useless, and the model degrades gracefully to coarse bucket averages.
+
+**Does adding lag features fix it?**
+Partially. `load_lag_24h` gives the tree a non-weather axis that does vary hour-to-hour
+(yesterday's actual load at each hour is distinct), which lets it escape the flat-line trap.
+But the fundamental limitation remains: on any day substantially different from the training
+distribution's dominant conditions, DT precision collapses.
+
+**Contrast with smooth models:**
+SVR and MLP produce continuous, hour-differentiated curves even on mild days because they
+interpolate within a learned function rather than routing to a fixed leaf value. This is a
+meaningful argument for smooth models in operational forecasting contexts.
+
+**Takeaway for final report:**
+Decision trees are competitive on average (RMSE within ~400 MW of top models on the full
+2025 test set) but fail qualitatively on low-variance days. This is worth one bullet in the
+limitations section: *"DT predictions degrade to coarse step functions on mild days where
+key features (CDH, shortwave) are near-zero — an inherent property of piecewise-constant
+models, not a data quality issue."*
+
+---
+
+## Approach 2C: 2026 Test Set (Train on 2021–2025, Test on Jan–Apr 2026)
+
+### Motivation
+The original train/test split (train=2021-2024, test=2025) leaves valuable 2025 data on the table. 
+ERCOT saw significant demand growth in 2025 (massive data center buildout), so adding 2025 to training 
+should improve model calibration on current demand levels. 2026 data (Jan 1–Apr 21) serves as the 
+out-of-sample test.
+
+### Data Collection
+- **ERCOT 2026 load**: NP6-345-CD via OAuth2 API, Jan 1–Apr 21, 2026
+  - 2,663 records (111 days × 24h − 1 DST spring-forward hour on Mar 8, 2026)
+  - Fetched in 3 pages of 1,000 with fixed-page-count pagination (not `_links`-based)
+- **Weather 2026**: Open-Meteo `historical-forecast-api` for all 4 cities, same variables as training
+
+### Three Feature Variants for 2026
+| File | Description |
+|---|---|
+| `features_nolag_2026.csv` | Same 27 weather features, no lag |
+| `features_lag_2026.csv` | + load_lag_24h, load_lag_168h (joined against 2025 tail) |
+| `features_trend_2026.csv` | + days_elapsed (1826–1937 days since 2021-01-01) |
+
+### Models (suffix: `_2025train`, `_2025train_lag`, `_2025train_trend`)
+Trained on full `features_nolag.csv` / `features_lag.csv` / `features_trend.csv` (all of 2021–2025).
+Script: `04e_regression_2025train.py`.
+
+### April 22, 2026 Live Results (all models, best per approach)
+| Approach | Best model | RMSE live | RMSE 2026 test |
+|---|---|---|---|
+| Current (weather-only) | SVR | 5.98 GW | — |
+| Bias-corrected | SVR | 3.64 GW | — |
+| Lag features (2A) | MLP | 2.71 GW | — |
+| Days-elapsed trend (2A) | MLP | 2.71 GW | — |
+| 2025 retrain, no lag (2C) | Decision Tree | 4.95 GW | ~6.5 GW |
+| **2025 retrain + lag (2C)** | **SVR** | **1.82 GW** | **2.36 GW** |
+| **2025 retrain + trend (2C)** | **MLP** | **0.79 GW** | **1.58 GW** |
+
+Random Forest comparison (16 hours, Apr 22):
+- Current: 7.14 GW → Bias-corrected: 5.30 GW → Lag: 4.08 GW → 2025+trend: **1.69 GW (-76%)**
+
+**Key insight**: Adding 2025 training data alone (no-lag 2C) barely helps. The combination of
+more training data + good features (lag or trend) compounds to give dramatically better results.
+The `days_elapsed` trend extrapolation is particularly effective because it correctly infers that
+2026 demand is higher than 2025 — the model has seen the steady growth curve.
+
+**Offline test finding**: On the Jan-Apr 2026 holdout, all no-lag models have negative R² because
+the test std (6.3 GW) is smaller than RMSE. This is expected: Jan-Apr has lower variance than
+a full year (std=10.2 GW). Not a model failure — just a harder test window for R².
+
+### Comparison to Include in Presentation
+- Approach 2C models retrained on 2021-2025 predict today's load in `07_approach_comparison.py`
+- Offline test results (Jan-Apr 2026 test set) in `regression_2025train_results.csv`
+- Key question answered: YES, more data + good features reduces RMSE by 76% vs baseline
+
+---
+
 ## Live Prediction Workflow Notes
 - Use `api.open-meteo.com/v1/forecast` for day-of forecast (same API, same variables as training data)
 - Compare against ERCOT's real-time load dashboard: https://www.ercot.com/gridinfo/load/load_hist

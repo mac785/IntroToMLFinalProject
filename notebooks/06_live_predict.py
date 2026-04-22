@@ -75,6 +75,7 @@ OMETO_FORECAST      = "https://api.open-meteo.com/v1/forecast"
 OMETO_HIST_FORECAST = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 
 def savefig(name):
+    FIGURES.mkdir(parents=True, exist_ok=True)
     plt.savefig(FIGURES / name, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"  [saved] {name}")
