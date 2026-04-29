@@ -55,7 +55,7 @@ TREND_COLS = ['days_elapsed']
 TARGET     = 'Load_MW'
 
 MODEL_NAMES = ["OLS", "Ridge", "Lasso", "Decision Tree",
-               "Random Forest", "Gradient Boost", "SVR", "MLP (PyTorch)"]
+               "Random Forest", "Gradient Boost", "SVR", "MLP"]
 
 MODEL_FILES = {
     "Ridge":          "ridge{s}.pkl",
@@ -125,8 +125,8 @@ def evaluate_variant(suffix, feat_cols, train_df, test_df, bias_offsets=None):
         with torch.no_grad():
             pred = model(X_sc).numpy()
         if bias_offsets:
-            pred += bias_offsets.get("MLP (PyTorch)", 0.0)
-        results["MLP (PyTorch)"] = rmse(y_test, pred)
+            pred += bias_offsets.get("MLP", 0.0)
+        results["MLP"] = rmse(y_test, pred)
 
     return results
 
@@ -136,9 +136,10 @@ def evaluate_variant(suffix, feat_cols, train_df, test_df, bias_offsets=None):
 # ══════════════════════════════════════════════════════════════════════════════
 print("Loading data ...")
 
-test_nolag  = pd.read_csv(PROC / "features_nolag_2026.csv",  parse_dates=["HourEnding"])
-test_lag    = pd.read_csv(PROC / "features_lag_2026.csv",    parse_dates=["HourEnding"])
-test_trend  = pd.read_csv(PROC / "features_trend_2026.csv",  parse_dates=["HourEnding"])
+test_nolag     = pd.read_csv(PROC / "features_nolag_2026.csv",     parse_dates=["HourEnding"])
+test_lag       = pd.read_csv(PROC / "features_lag_2026.csv",       parse_dates=["HourEnding"])
+test_trend     = pd.read_csv(PROC / "features_trend_2026.csv",     parse_dates=["HourEnding"])
+test_lag_trend = pd.read_csv(PROC / "features_lag_trend_2026.csv", parse_dates=["HourEnding"])
 
 # Training data: 2021-2024 (original split)
 train_nolag_orig  = pd.read_csv(PROC / "features_nolag.csv",  parse_dates=["HourEnding"])
@@ -151,9 +152,10 @@ train_trend_orig  = pd.read_csv(PROC / "features_trend.csv",  parse_dates=["Hour
 train_trend_orig  = train_trend_orig[train_trend_orig["HourEnding"].dt.year < 2025]
 
 # Training data: 2021-2025 (2C full)
-train_nolag_full  = pd.read_csv(PROC / "features_nolag.csv",  parse_dates=["HourEnding"])
-train_lag_full    = pd.read_csv(PROC / "features_lag.csv",    parse_dates=["HourEnding"])
-train_trend_full  = pd.read_csv(PROC / "features_trend.csv",  parse_dates=["HourEnding"])
+train_nolag_full     = pd.read_csv(PROC / "features_nolag.csv",     parse_dates=["HourEnding"])
+train_lag_full       = pd.read_csv(PROC / "features_lag.csv",       parse_dates=["HourEnding"])
+train_trend_full     = pd.read_csv(PROC / "features_trend.csv",     parse_dates=["HourEnding"])
+train_lag_trend_full = pd.read_csv(PROC / "features_lag_trend.csv", parse_dates=["HourEnding"])
 
 # Bias offsets
 bias_offsets = {}
@@ -170,7 +172,7 @@ print(f"  Test set: {len(test_nolag)} hours  "
 # ══════════════════════════════════════════════════════════════════════════════
 APPROACHES = [
     {
-        "label":   "Current\n(no lag)",
+        "label":   "Current (weather-only)",
         "suffix":  "",
         "feat_cols": FEATURE_COLS,
         "train_df":  train_nolag_orig,
@@ -179,7 +181,7 @@ APPROACHES = [
         "color":     "#4C72B0",
     },
     {
-        "label":   "Bias-\ncorrected",
+        "label":   "Bias-corrected",
         "suffix":  "",
         "feat_cols": FEATURE_COLS,
         "train_df":  train_nolag_orig,
@@ -188,7 +190,7 @@ APPROACHES = [
         "color":     "#DD8452",
     },
     {
-        "label":   "Lag\nfeatures",
+        "label":   "Lag features",
         "suffix":  "_lag",
         "feat_cols": FEATURE_COLS + LAG_COLS,
         "train_df":  train_lag_orig,
@@ -197,7 +199,7 @@ APPROACHES = [
         "color":     "#55A868",
     },
     {
-        "label":   "Trend\n(2A)",
+        "label":   "Days-elapsed trend",
         "suffix":  "_trend",
         "feat_cols": FEATURE_COLS + TREND_COLS,
         "train_df":  train_trend_orig,
@@ -206,7 +208,7 @@ APPROACHES = [
         "color":     "#C44E52",
     },
     {
-        "label":   "2025 retrain\nno lag (2C)",
+        "label":   "2025 retrain",
         "suffix":  "_2025train",
         "feat_cols": FEATURE_COLS,
         "train_df":  train_nolag_full,
@@ -215,7 +217,7 @@ APPROACHES = [
         "color":     "#8172B2",
     },
     {
-        "label":   "2025 retrain\n+ lag (2C)",
+        "label":   "2025 retrain\n+ lag",
         "suffix":  "_2025train_lag",
         "feat_cols": FEATURE_COLS + LAG_COLS,
         "train_df":  train_lag_full,
@@ -224,13 +226,22 @@ APPROACHES = [
         "color":     "#937860",
     },
     {
-        "label":   "2025 retrain\n+ trend (2C)",
+        "label":   "2025 retrain\n+ trend",
         "suffix":  "_2025train_trend",
         "feat_cols": FEATURE_COLS + TREND_COLS,
         "train_df":  train_trend_full,
         "test_df":   test_trend,
         "bias":      None,
         "color":     "#E377C2",
+    },
+    {
+        "label":   "2025 retrain\n+ lag + trend",
+        "suffix":  "_2025train_lag_trend",
+        "feat_cols": FEATURE_COLS + LAG_COLS + TREND_COLS,
+        "train_df":  train_lag_trend_full,
+        "test_df":   test_lag_trend,
+        "bias":      None,
+        "color":     "#2CA02C",
     },
 ]
 
@@ -262,11 +273,34 @@ n_approaches    = len(APPROACHES)
 width           = 0.8 / n_approaches
 x               = np.arange(len(MODEL_NAMES))
 
+# Collect all bar positions and values for min-finding
+bar_data = []   # list of (model_idx, approach_idx, x_pos, rmse_val, bar_obj)
+
 for i, (ap_label, color) in enumerate(zip(approach_labels, colors)):
     rmse_vals = [all_rmse[ap_label].get(m, np.nan) for m in MODEL_NAMES]
     offset    = (i - n_approaches / 2 + 0.5) * width
     bars      = ax.bar(x + offset, rmse_vals, width=width * 0.9,
                        label=ap_label.replace("\n", " "), color=color, alpha=0.85)
+    for j, (bar, val) in enumerate(zip(bars, rmse_vals)):
+        if not np.isnan(val):
+            bar_data.append((j, i, bar.get_x() + bar.get_width() / 2, val, bar))
+
+# For each model group, find and annotate the minimum bar
+for model_idx in range(len(MODEL_NAMES)):
+    group = [(ap_i, xpos, val, bar) for (m_i, ap_i, xpos, val, bar) in bar_data if m_i == model_idx]
+    if not group:
+        continue
+    best = min(group, key=lambda t: t[2])
+    _, xpos, val, bar = best
+
+    # Highlight with a bold black border
+    bar.set_edgecolor("black")
+    bar.set_linewidth(2.0)
+
+    # Annotate with value above the bar
+    ax.text(xpos, val + 0.15, f"{val:.2f}",
+            ha="center", va="bottom", fontsize=7, fontweight="bold", color="black",
+            rotation=90)
 
 ax.set_xticks(x)
 ax.set_xticklabels(MODEL_NAMES, rotation=20, ha="right")

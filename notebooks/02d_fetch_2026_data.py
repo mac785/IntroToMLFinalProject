@@ -1,14 +1,15 @@
 """
 Phase 2d: Fetch 2026 ERCOT + Weather Data and Engineer Features (Approach 2C)
 
-Collects Jan 1 – Apr 21, 2026 data from:
+Collects Jan 1 – Apr 28, 2026 data from:
   - ERCOT NP6-345-CD (hourly actual system load, OAuth2 authenticated)
   - Open-Meteo historical-forecast-api (same 4 cities, same variables as training)
 
 Outputs (data/processed/):
-  features_nolag_2026.csv  — 27-feature schema identical to features_nolag.csv
-  features_lag_2026.csv    — adds load_lag_24h + load_lag_168h (joined against 2025 tail)
-  features_trend_2026.csv  — adds days_elapsed (fractional days since 2021-01-01)
+  features_nolag_2026.csv      — 27-feature schema identical to features_nolag.csv
+  features_lag_2026.csv        — adds load_lag_24h + load_lag_168h (joined against 2025 tail)
+  features_trend_2026.csv      — adds days_elapsed (fractional days since 2021-01-01)
+  features_lag_trend_2026.csv  — adds lag + days_elapsed (for 2025 retrain + lag+trend variant)
 """
 
 import os
@@ -17,6 +18,7 @@ import requests
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from datetime import date, timedelta
 from dotenv import load_dotenv
 
 try:
@@ -34,7 +36,7 @@ BALANCE_TEMP_F = 65.0
 ORIGIN         = pd.Timestamp("2021-01-01")
 
 START_DATE = "2026-01-01"
-END_DATE   = "2026-04-21"
+END_DATE   = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 STATIONS = {
     "Austin":     (30.1945, -97.6699),
@@ -91,8 +93,12 @@ def fetch_ercot_2026(username, password, sub_key) -> pd.DataFrame:
     """Fetch NP6-345-CD for START_DATE–END_DATE with pagination."""
     cache = RAW / "ercot_np6345_2026.csv"
     if cache.exists():
-        print(f"  [cached] {cache}")
-        return pd.read_csv(cache, parse_dates=["HourEnding"])
+        cached = pd.read_csv(cache, parse_dates=["HourEnding"])
+        if cached["HourEnding"].max().date() >= pd.Timestamp(END_DATE).date():
+            print(f"  [cached] {cache}  (through {cached['HourEnding'].max().date()})")
+            return cached
+        print(f"  Cache outdated (max: {cached['HourEnding'].max().date()}) — refetching through {END_DATE}")
+        cache.unlink()
 
     token = _ercot_token(username, password, sub_key)
     hdrs  = {"Authorization": f"Bearer {token}",
@@ -157,8 +163,12 @@ def fetch_weather_2026() -> pd.DataFrame:
     """Fetch Open-Meteo historical for all 4 cities, Jan 1–Apr 21, 2026."""
     cache = RAW / "weather_2026.csv"
     if cache.exists():
-        print(f"  [cached] {cache}")
-        return pd.read_csv(cache, parse_dates=["HourEnding"])
+        cached = pd.read_csv(cache, parse_dates=["HourEnding"])
+        if cached["HourEnding"].max().date() >= pd.Timestamp(END_DATE).date():
+            print(f"  [cached] {cache}  (through {cached['HourEnding'].max().date()})")
+            return cached
+        print(f"  Cache outdated (max: {cached['HourEnding'].max().date()}) — refetching through {END_DATE}")
+        cache.unlink()
 
     url    = "https://historical-forecast-api.open-meteo.com/v1/forecast"
     frames = []
@@ -327,4 +337,12 @@ out_trend = PROC / "features_trend_2026.csv"
 df_trend.to_csv(out_trend, index=False)
 print(f"Saved → {out_trend}  ({len(df_trend)} rows)")
 
-print("\nPhase 2d complete.")
+# ── Save lag+trend combined variant ───────────────────────────────────────────
+df_lag_trend = df_lag.merge(
+    df_trend[["HourEnding", "days_elapsed"]], on="HourEnding", how="inner")
+out_lag_trend = PROC / "features_lag_trend_2026.csv"
+df_lag_trend.to_csv(out_lag_trend, index=False)
+print(f"Saved → {out_lag_trend}  ({len(df_lag_trend)} rows)")
+
+print(f"\nAll 2026 feature files cover {START_DATE} → {END_DATE}")
+print("Phase 2d complete.")

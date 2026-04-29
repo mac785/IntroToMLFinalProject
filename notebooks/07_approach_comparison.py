@@ -104,17 +104,17 @@ VARIANTS = [
         "color":       "#55A868",
     },
     {
-        "label":       "Days-elapsed trend (2A)",
+        "label":       "Days-elapsed trend",
         "feature_set": "trend",
         "suffix":      "_trend",
         "bias_key":    None,
         "lag_hours":   [],
         "color":       "#C44E52",
     },
-    # ── Approach 2C: 2025 retrain ─────────────────────────────────────────────
+    # ── 2025 retrain variants ─────────────────────────────────────────────────
     # Trained on full 2021-2025 data; run 04e_regression_2025train.py first
     {
-        "label":       "2025 retrain - no lag (2C)",
+        "label":       "2025 retrain",
         "feature_set": "nolag_full",
         "suffix":      "_2025train",
         "bias_key":    None,
@@ -122,7 +122,7 @@ VARIANTS = [
         "color":       "#8172B2",
     },
     {
-        "label":       "2025 retrain + lag (2C)",
+        "label":       "2025 retrain + lag",
         "feature_set": "lag_full",
         "suffix":      "_2025train_lag",
         "bias_key":    None,
@@ -130,12 +130,20 @@ VARIANTS = [
         "color":       "#937860",
     },
     {
-        "label":       "2025 retrain + trend (2C)",
+        "label":       "2025 retrain + trend",
         "feature_set": "trend_full",
         "suffix":      "_2025train_trend",
         "bias_key":    None,
         "lag_hours":   [],
         "color":       "#E377C2",
+    },
+    {
+        "label":       "2025 retrain + lag + trend",
+        "feature_set": "lag_trend_full",
+        "suffix":      "_2025train_lag_trend",
+        "bias_key":    None,
+        "lag_hours":   [24, 168],
+        "color":       "#2CA02C",
     },
 ]
 
@@ -355,9 +363,10 @@ train_trend = pd.read_csv(PROC / "features_trend.csv", parse_dates=["HourEnding"
 train_trend = train_trend[train_trend["HourEnding"].dt.year < 2025]
 
 # 2021-2025 (full) — used by 2C retrain variants (04e_regression_2025train.py)
-train_nolag_full  = pd.read_csv(PROC / "features_nolag.csv",  parse_dates=["HourEnding"])
-train_lag_full    = pd.read_csv(PROC / "features_lag.csv",    parse_dates=["HourEnding"])
-train_trend_full  = pd.read_csv(PROC / "features_trend.csv",  parse_dates=["HourEnding"])
+train_nolag_full     = pd.read_csv(PROC / "features_nolag.csv",     parse_dates=["HourEnding"])
+train_lag_full       = pd.read_csv(PROC / "features_lag.csv",       parse_dates=["HourEnding"])
+train_trend_full     = pd.read_csv(PROC / "features_trend.csv",     parse_dates=["HourEnding"])
+train_lag_trend_full = pd.read_csv(PROC / "features_lag_trend.csv", parse_dates=["HourEnding"])
 print(f"  train_nolag_full: {len(train_nolag_full):,} rows "
       f"({train_nolag_full['HourEnding'].min().year}–{train_nolag_full['HourEnding'].max().year})")
 
@@ -389,16 +398,18 @@ ORIGIN = pd.Timestamp("2021-01-01")
 days_elapsed_live = np.array(
     [(ts - ORIGIN).total_seconds() / 86400 for ts in wx["HourEnding"]]
 ).reshape(-1, 1)
-X_trend_full = np.hstack([X_base, days_elapsed_live])
+X_trend_full        = np.hstack([X_base, days_elapsed_live])
+X_lag_trend_full    = np.hstack([X_base, lag_matrix, days_elapsed_live])
 
 FEATURE_SETS = {
-    "nolag":       (X_base,       FEATURE_COLS,                   train_nolag),
-    "lag":         (X_lag_full,   FEATURE_COLS + LAG_COLS,         train_lag),
-    "trend":       (X_trend_full, FEATURE_COLS + ['days_elapsed'], train_trend),
+    "nolag":          (X_base,            FEATURE_COLS,                              train_nolag),
+    "lag":            (X_lag_full,        FEATURE_COLS + LAG_COLS,                   train_lag),
+    "trend":          (X_trend_full,      FEATURE_COLS + ['days_elapsed'],            train_trend),
     # 2C variants: same live features, but OLS fitted on full 2021-2025 training data
-    "nolag_full":  (X_base,       FEATURE_COLS,                   train_nolag_full),
-    "lag_full":    (X_lag_full,   FEATURE_COLS + LAG_COLS,         train_lag_full),
-    "trend_full":  (X_trend_full, FEATURE_COLS + ['days_elapsed'], train_trend_full),
+    "nolag_full":     (X_base,            FEATURE_COLS,                              train_nolag_full),
+    "lag_full":       (X_lag_full,        FEATURE_COLS + LAG_COLS,                   train_lag_full),
+    "trend_full":     (X_trend_full,      FEATURE_COLS + ['days_elapsed'],            train_trend_full),
+    "lag_trend_full": (X_lag_trend_full,  FEATURE_COLS + LAG_COLS + ['days_elapsed'], train_lag_trend_full),
 }
 
 SKLEARN_MODELS = ["Ridge", "Lasso", "Decision Tree",
@@ -459,7 +470,7 @@ for v in VARIANTS:
         mlp_m.load_state_dict(torch.load(mlp_state_path, map_location="cpu"))
         mlp_m.eval()
         with torch.no_grad():
-            preds["MLP (PyTorch)"] = mlp_m(X_mlp).numpy()
+            preds["MLP"] = mlp_m(X_mlp).numpy()
     else:
         # Fall back to baseline MLP only when feature dimensions match (27 features)
         state_fallback = MODELS / "mlp_state.pt"
@@ -470,7 +481,7 @@ for v in VARIANTS:
             mlp_m.load_state_dict(torch.load(state_fallback, map_location="cpu"))
             mlp_m.eval()
             with torch.no_grad():
-                preds["MLP (PyTorch)"] = mlp_m(X_mlp).numpy()
+                preds["MLP"] = mlp_m(X_mlp).numpy()
         else:
             print(f"  [{label}] MLP weights not found — skipping MLP.")
 
@@ -554,7 +565,7 @@ MODEL_COLORS = {
     "Random Forest":  "#8172B2",
     "Gradient Boost": "#937860",
     "SVR":            "#DA8BC3",
-    "MLP (PyTorch)":  "#8C8C8C",
+    "MLP":  "#8C8C8C",
 }
 
 # Pre-compute per-model RMSE for every variant (used by figs 23 and 24)
@@ -618,7 +629,7 @@ savefig("23_approach_comparison_live.png")
 # ── Fig 24: RMSE bar chart (all models, all variants) ───────────────────────
 if actual_by_hour and all_rmse:
     all_model_names = ["OLS", "Ridge", "Lasso", "Decision Tree",
-                       "Random Forest", "Gradient Boost", "SVR", "MLP (PyTorch)"]
+                       "Random Forest", "Gradient Boost", "SVR", "MLP"]
     rmse_df = pd.DataFrame(all_rmse).reindex(
         [m for m in all_model_names
          if any(m in all_rmse[k] for k in all_rmse)])
@@ -643,42 +654,56 @@ if actual_by_hour and all_rmse:
     savefig("24_approach_rmse_comparison.png")
 
 
-# ── Fig 25: All models for each variant in one figure (subplots) ─────────────
+# ── Fig 25: All models for each variant in one figure (4×2 grid) ─────────────
 active_variants = [v for v in VARIANTS if v["label"] in variant_preds]
 n_panels        = len(active_variants)
-fig, axes       = plt.subplots(n_panels, 1,
-                               figsize=(14, 4 * n_panels), sharex=True)
-if n_panels == 1:
-    axes = [axes]
+n_cols          = 4
+n_rows          = (n_panels + n_cols - 1) // n_cols
+fig, axes       = plt.subplots(n_rows, n_cols,
+                               figsize=(5 * n_cols, 4 * n_rows),
+                               sharex=True, sharey=True)
+axes_flat = axes.flatten() if n_panels > 1 else [axes]
 
 act_h  = sorted(actual_by_hour) if actual_by_hour else []
 act_mw = [actual_by_hour[h] for h in act_h]
 
-for ax, v in zip(axes, active_variants):
+for ax, v in zip(axes_flat, active_variants):
     vlabel = v["label"]
     preds  = variant_preds[vlabel]
 
     for model_label, p in preds.items():
         rmse_str = (f"  {all_rmse[vlabel][model_label]/1000:.2f} GW"
                     if model_label in all_rmse.get(vlabel, {}) else "")
-        ax.plot(hours, p / 1000, lw=1.5, alpha=0.85,
+        ax.plot(hours, p / 1000, lw=1.3, alpha=0.85,
                 color=MODEL_COLORS.get(model_label, "gray"),
                 label=f"{model_label}{rmse_str}")
 
     if act_h:
         ax.plot(hours.iloc[act_h], np.array(act_mw) / 1000,
-                color="black", lw=2.5, label="ERCOT Actual", zorder=10)
+                color="black", lw=2.2, label="ERCOT Actual", zorder=10)
 
-    ax.axhline(PEAK_MW / 1000, color="red", lw=1, ls="--", alpha=0.4)
+    ax.axhline(PEAK_MW / 1000, color="red", lw=1, ls="--", alpha=0.4,
+               label="Peak threshold (90th pct)" if ax is axes_flat[0] else "_nolegend_")
     ax.set_ylabel("Load (GW)")
-    ax.set_title(vlabel)
+    ax.set_title(vlabel, fontsize=11)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%-I%p"))
-    ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-    ax.legend(fontsize=8, ncol=3, loc="upper left")
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=4))
+    pass  # legend handled below
+
+# Hide any unused axes (in case n_panels doesn't fill the grid)
+for ax in axes_flat[n_panels:]:
+    ax.set_visible(False)
+
+# Single shared legend below the grid (strip per-panel RMSE from labels)
+handles, labels = axes_flat[0].get_legend_handles_labels()
+clean_labels = [lbl.split('  ')[0] for lbl in labels]
+fig.legend(handles, clean_labels,
+           loc="lower center", bbox_to_anchor=(0.5, 0),
+           ncol=5, fontsize=8, framealpha=0.9)
 
 plt.suptitle(f"All Models by Approach — {today.strftime('%B %d, %Y')}",
-             fontsize=13, y=1.01)
-plt.tight_layout()
+             fontsize=14, y=1.02)
+plt.tight_layout(rect=[0, 0.09, 1, 1])
 savefig("25_all_models_by_approach.png")
 
 print(f"\nFigures saved to {FIGURES}")

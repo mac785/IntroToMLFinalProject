@@ -162,7 +162,7 @@ def train_and_eval(train_df, test_df, feat_cols, suffix, variant_name):
     joblib.dump(svr_pipe, MODELS / f"svr{suffix}.pkl")
 
     # ── 8. MLP ────────────────────────────────────────────────────────────────
-    print("  --- MLP (PyTorch) ---")
+    print("  --- MLP ---")
     mlp_scaler  = StandardScaler()
     X_train_np  = mlp_scaler.fit_transform(X_train)
     X_test_np   = mlp_scaler.transform(X_test)
@@ -195,7 +195,7 @@ def train_and_eval(train_df, test_df, feat_cols, suffix, variant_name):
     mlp_model.eval()
     with torch.no_grad():
         mlp_pred = mlp_module(X_test_t).numpy()
-    results.append(metrics(y_test, mlp_pred, "MLP (PyTorch)", variant_name))
+    results.append(metrics(y_test, mlp_pred, "MLP", variant_name))
 
     torch.save(mlp_model.state_dict(), MODELS / f"mlp_state{suffix}.pt")
     joblib.dump(mlp_scaler, MODELS / f"mlp_scaler{suffix}.pkl")
@@ -245,6 +245,28 @@ print(f"  Test:  {test_c['HourEnding'].min()} → {test_c['HourEnding'].max()}\n
 
 res_c = train_and_eval(train_c, test_c, FEATURE_COLS + TREND_COLS, "_2025train_trend", "2025train_trend")
 all_results.extend(res_c)
+
+# ── Variant D: Lag + Trend (combined) ─────────────────────────────────────────
+print("\n=== Variant D: Lag + Trend  (suffix: _2025train_lag_trend) ===")
+
+train_d = train_b.merge(
+    train_c[["HourEnding", "days_elapsed"]], on="HourEnding", how="inner")
+test_d  = test_b.merge(
+    test_c[["HourEnding", "days_elapsed"]], on="HourEnding", how="inner")
+
+train_d = train_d.sort_values("HourEnding").reset_index(drop=True)
+test_d  = test_d.sort_values("HourEnding").reset_index(drop=True)
+
+train_d.to_csv(PROC / "features_lag_trend.csv", index=False)
+test_d.to_csv(PROC / "features_lag_trend_2026.csv", index=False)
+print(f"  Saved features_lag_trend.csv ({len(train_d):,} rows)")
+print(f"  Saved features_lag_trend_2026.csv ({len(test_d):,} rows)")
+print(f"  Train: {train_d['HourEnding'].min()} → {train_d['HourEnding'].max()}")
+print(f"  Test:  {test_d['HourEnding'].min()} → {test_d['HourEnding'].max()}\n")
+
+res_d = train_and_eval(train_d, test_d, FEATURE_COLS + LAG_COLS + TREND_COLS,
+                       "_2025train_lag_trend", "2025train_lag_trend")
+all_results.extend(res_d)
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 print("\n=== 2025 Retrain Results Summary (Test Set: Jan–Apr 2026) ===")
