@@ -83,13 +83,13 @@ Max observed load: **85,464 MW**, within 44 MW of the all-time ERCOT record (Aug
 
 | Group | Features |
 |---|---|
-| Weather | temp, apparent temp, humidity, dew point, wind, solar radiation (× 4 cities + avg) |
-| Nonlinear weather | CDH, HDH, temp² |
+| Weather | temp, apparent temp (feels like), humidity, dew point, wind, solar radiation (× 4 cities + avg) |
+| Nonlinear weather | CDH (Cooling Degree Hours), HDH (Heating Degree Hours), temp² |
 | Time / calendar | hour_sin/cos, month_sin/cos, dow_sin/cos, is_weekend, is_holiday, season |
 | Interactions | temp × hour_sin, CDH × hour_sin, temp × is_weekend |
 
 **Key decisions:**
-- CDH = max(temp - 65°F, 0): "activates" only when AC is needed, r = **0.82** vs r = 0.57 for raw temp
+- CDH = max(temp − 65°F, 0): activates only when cooling (AC) is needed; HDH = max(65°F − temp, 0): activates only when heating is needed. Together they split the U-shape into two linear slopes, r = **0.82** vs r = 0.57 for raw temp
 - Cyclic sin/cos encoding: month_cos achieves r = -0.38 vs raw month r = 0.14
 
 ---
